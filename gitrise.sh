@@ -194,26 +194,39 @@ EOF
 function trigger_build() {
     local response=""
     if [ -z "${TESTING_ENABLED}" ]; then 
-        local command="curl --silent -X POST https://api.bitrise.io/v0.1/apps/$PROJECT_SLUG/builds \
-                --data '{"payload":'"$(generate_build_payload)"'}'
-                --header 'Content-Type: application/json' \
-                --header 'Accept: application/json' --header 'Authorization: $ACCESS_TOKEN'"
-        response=$(eval "${command}") 
+        # Capture the JSON safely
+        local payload_json
+        payload_json=$(generate_build_payload)
+
+        # Wrap it in "payload": {...} using jq
+        local data
+        data=$(jq -n --argjson inner "$payload_json" '{payload: $inner}')
+
+        # Trigger the Bitrise build
+        response=$(curl --silent -X POST "https://api.bitrise.io/v0.1/apps/$PROJECT_SLUG/builds" \
+            --data "$data" \
+            --header "Content-Type: application/json" \
+            --header "Accept: application/json" \
+            --header "Authorization: $ACCESS_TOKEN")
     else
         response=$(<./testdata/"$1"_build_trigger_response.json)
     fi
-    [ "$DEBUG" == "true" ] && log "${command%'--data'*}" "$response" "trigger_build.log"
-    
-    status=$(echo "$response" | jq ".status" | sed 's/"//g' )
+
+    # Debug logging
+    [ "$DEBUG" == "true" ] && log "curl -X POST https://api.bitrise.io/v0.1/apps/$PROJECT_SLUG/builds" "$response" "trigger_build.log"
+
+    # Parse response
+    status=$(echo "$response" | jq -r ".status")
     if [ "$status" != "ok" ]; then
-        msg=$(echo "$response" | jq ".message" | sed 's/"//g')
+        msg=$(echo "$response" | jq -r ".message")
         printf "%s" "ERROR: $msg"
         exit 1
     else 
-        build_url=$(echo "$response" | jq ".build_url" | sed 's/"//g')
-        build_slug=$(echo "$response" | jq ".build_slug" | sed 's/"//g')
+        build_url=$(echo "$response" | jq -r ".build_url")
+        build_slug=$(echo "$response" | jq -r ".build_slug")
     fi
-    printf "\nHold on... We're about to liftoff! 🚀\n \nBuild URL: %s\n" "${build_url}"
+
+    printf "\nHold on... We're about to liftoff! 🚀\n\nBuild URL: %s\n" "${build_url}"
 }
 
 function process_build() {
